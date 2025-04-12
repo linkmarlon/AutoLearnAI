@@ -1,0 +1,16 @@
+streamlit
+chromadb
+sentence-transformers
+transformers
+torch
+pdfplumber
+python-docx
+python-pptx
+py7zr
+rarfile
+requests
+beautifulsoup4
+mega.py
+gdown
+pycryptodome
+python-magic
