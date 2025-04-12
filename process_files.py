@@ -19,8 +19,9 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 import base64
 import magic
-from security import validate_url
+from security import validate_url, validate_file
 import logging
+from bs4 import BeautifulSoup
 
 logging.basicConfig(
     filename='data/errors.log',
@@ -35,7 +36,7 @@ collection = None
 def get_file_hash(data):
     try:
         hasher = hashlib.md5()
-        hasher.update(data)
+        hasher.update(data if isinstance(data, bytes) else bytes(data))
         return hasher.hexdigest()
     except Exception as e:
         logger.error(f"Erro ao calcular hash: {str(e)}")
@@ -43,6 +44,8 @@ def get_file_hash(data):
 
 def encrypt_file(data, key):
     try:
+        if isinstance(data, bytearray):
+            data = bytes(data)
         cipher = AES.new(base64.b64decode(key), AES.MODE_EAX)
         ciphertext, tag = cipher.encrypt_and_digest(data)
         return cipher.nonce + tag + ciphertext
@@ -61,84 +64,89 @@ def decrypt_file(encrypted_data, key):
         logger.error(f"Erro ao descriptografar arquivo: {str(e)}")
         return None
 
-def validate_file(file_data):
-    try:
-        mime = magic.Magic(mime=True)
-        file_type = mime.from_buffer(file_data)
-        allowed_types = [
-            'text/', 'application/pdf', 'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'application/vnd.ms-powerpoint', 'application/zip', 'application/x-rar-compressed',
-            'application/x-7z-compressed', 'application/x-tar', 'application/gzip', 'application/x-bzip2'
-        ]
-        if not any(file_type.startswith(t) for t in allowed_types):
-            logger.error(f"Tipo de arquivo inválido: {file_type}")
-            return False
-        return True
-    except Exception as e:
-        logger.error(f"Erro ao validar arquivo: {str(e)}")
-        return False
-
 def download_from_terabox(url):
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
-        return BytesIO(response.content)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        download_links = [a['href'] for a in soup.find_all('a', href=True) if 'sharing/link' in a['href']]
+        if download_links:
+            file_data = []
+            for link in download_links:
+                file_response = requests.get(link, timeout=10)
+                file_response.raise_for_status()
+                file_data.append(file_response.content)
+            return file_data
+        return [response.content]
     except Exception as e:
         logger.error(f"Erro ao baixar do Terabox: {str(e)}")
+        raise
+
+def download_from_mega(url):
+    try:
+        m = mega.Mega().login()
+        file_data = []
+        if '/folder/' in url or '/fm/' in url:
+            folder_id = url.split('/')[-1]
+            folder = m.get_files_in_node(folder_id)
+            for file_id, file_info in folder.items():
+                if file_info['t'] == 0:  # Arquivo
+                    file_data.append(m.download(file_id))
+        else:
+            file_data.append(m.download_url(url))
+        return file_data if file_data else [m.download_url(url)]
+    except Exception as e:
+        logger.error(f"Erro ao baixar do MEGA: {str(e)}")
+        raise
+
+def download_from_google_drive(url):
+    try:
+        file_id = url.split('/d/')[1].split('/')[0]
+        response = requests.get(f"https://drive.google.com/uc?export=download&id={file_id}", timeout=10)
+        response.raise_for_status()
+        return [response.content]
+    except Exception as e:
+        logger.error(f"Erro ao baixar do Google Drive: {str(e)}")
+        raise
+
+def download_from_google_docs(url):
+    try:
+        file_id = url.split('/d/')[1].split('/')[0]
+        response = requests.get(f"https://docs.google.com/document/d/{file_id}/export?format=txt", timeout=10)
+        response.raise_for_status()
+        return [response.content]
+    except Exception as e:
+        logger.error(f"Erro ao baixar do Google Docs: {str(e)}")
         raise
 
 def download_file(source, url, encryption_key):
     try:
         temp_dir = 'data/'
         os.makedirs(temp_dir, exist_ok=True)
-        file_path = os.path.join(temp_dir, 'temp_file')
+        files_data = []
+        
         if source == "Terabox":
-            if not validate_url(url):
-                logger.error(f"URL do Terabox inválido: {url}")
-                raise ValueError("Link do Terabox inválido")
-            data = download_from_terabox(url).read()
-            if validate_file(data):
-                encrypted_data = encrypt_file(data, encryption_key)
-                with open(file_path, 'wb') as f:
-                    f.write(encrypted_data)
-            else:
-                raise ValueError("Arquivo não permitido")
+            files_data = download_from_terabox(url)
         elif source == "MEGA":
-            if not validate_url(url):
-                logger.error(f"URL do MEGA inválido: {url}")
-                raise ValueError("Link do MEGA inválido")
-            m = mega.Mega().login()
-            m.download_url(url, dest_path=temp_dir)
-            temp_path = os.path.join(temp_dir, os.listdir(temp_dir)[0])
-            with open(temp_path, 'rb') as f:
-                data = f.read()
-            if validate_file(data):
-                encrypted_data = encrypt_file(data, encryption_key)
-                with open(file_path, 'wb') as f:
-                    f.write(encrypted_data)
-            else:
-                raise ValueError("Arquivo não permitido")
-            os.remove(temp_path)
+            files_data = download_from_mega(url)
         elif source == "Google Drive":
-            if not validate_url(url):
-                logger.error(f"URL do Google Drive inválido: {url}")
-                raise ValueError("Link do Google Drive inválido")
-            download(url, temp_dir, quiet=False)
-            temp_path = os.path.join(temp_dir, os.listdir(temp_dir)[0])
-            with open(temp_path, 'rb') as f:
-                data = f.read()
+            files_data = download_from_google_drive(url)
+        elif source == "Google Docs":
+            files_data = download_from_google_docs(url)
+        else:
+            raise ValueError("Fonte não suportada")
+
+        file_paths = []
+        for i, data in enumerate(files_data):
             if validate_file(data):
                 encrypted_data = encrypt_file(data, encryption_key)
+                file_path = os.path.join(temp_dir, f'temp_file_{i}')
                 with open(file_path, 'wb') as f:
                     f.write(encrypted_data)
+                file_paths.append(file_path)
             else:
-                raise ValueError("Arquivo não permitido")
-            os.remove(temp_path)
-        else:
-            logger.error(f"Fonte inválida: {source}")
-            raise ValueError("Fonte não permitida")
-        return file_path
+                logger.error(f"Arquivo inválido bloqueado: {url}")
+        return file_paths
     except Exception as e:
         logger.error(f"Erro ao baixar arquivo de {source}: {str(e)}")
         raise
@@ -154,7 +162,7 @@ def extract_text(file_path, encryption_key):
         with open(temp_file, 'wb') as f:
             f.write(data)
     except Exception as e:
-        logger.error(f"Erro ao preparar arquivo para extração: {str(e)}")
+        logger.error(f"Erro ao preparar arquivo: {str(e)}")
         return "[Erro ao processar arquivo]"
 
     ext = os.path.splitext(temp_file)[1].lower()
@@ -192,11 +200,26 @@ def extract_text(file_path, encryption_key):
             texts = []
             for root, _, files in os.walk(temp_extract):
                 for f in files:
-                    texts.append(extract_text(os.path.join(root, f), encryption_key))
+                    file_path = os.path.join(root, f)
+                    # Processar todos os arquivos extraídos
+                    with open(file_path, 'rb') as ff:
+                        temp_data = ff.read()
+                    if validate_file(temp_data):
+                        temp_encrypted = encrypt_file(temp_data, encryption_key)
+                        temp_enc_path = os.path.join(temp_extract, f'enc_{f}')
+                        with open(temp_enc_path, 'wb') as ff:
+                            ff.write(temp_encrypted)
+                        texts.append(extract_text(temp_enc_path, encryption_key))
+                    else:
+                        logger.error(f"Arquivo extraído bloqueado: {f}")
             return '\n'.join(texts)
         else:
-            with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
-                return f.read()
+            # Tentar ler como texto ou binário
+            try:
+                with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    return f.read()
+            except:
+                return "[Arquivo binário, processado como dados brutos]"
     except Exception as e:
         logger.error(f"Erro ao extrair texto de {file_path}: {str(e)}")
         return f"[Erro ao ler arquivo: {e}]"
@@ -230,7 +253,7 @@ def process_files(files, source='Computador', shared=False, encryption_key=None)
                             texts.append(extract_text(file_path, encryption_key))
                             file_hashes.append(file_hash)
                         else:
-                            logger.info(f"Arquivo duplicado ignorado: {file.name}")
+                            logger.info(f"Arquivo duplicado: {file.name}")
                     else:
                         logger.error(f"Arquivo inválido: {file.name}")
                 except Exception as e:
@@ -239,17 +262,18 @@ def process_files(files, source='Computador', shared=False, encryption_key=None)
             for url in files:
                 if url.strip():
                     try:
-                        file_path = download_file(source, url, encryption_key)
-                        with open(file_path, 'rb') as f:
-                            encrypted_data = f.read()
-                        decrypted_data = decrypt_file(encrypted_data, encryption_key)
-                        if decrypted_data:
-                            file_hash = get_file_hash(decrypted_data)
-                            if file_hash not in existing_hashes:
-                                texts.append(extract_text(file_path, encryption_key))
-                                file_hashes.append(file_hash)
-                        else:
-                            logger.error(f"Falha ao descriptografar arquivo de {url}")
+                        file_paths = download_file(source, url, encryption_key)
+                        for file_path in file_paths:
+                            with open(file_path, 'rb') as f:
+                                encrypted_data = f.read()
+                            decrypted_data = decrypt_file(encrypted_data, encryption_key)
+                            if decrypted_data:
+                                file_hash = get_file_hash(decrypted_data)
+                                if file_hash not in existing_hashes:
+                                    texts.append(extract_text(file_path, encryption_key))
+                                    file_hashes.append(file_hash)
+                            else:
+                                logger.error(f"Falha ao descriptografar: {url}")
                     except Exception as e:
                         logger.error(f"Erro ao processar URL {url}: {str(e)}")
 

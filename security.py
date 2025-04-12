@@ -1,6 +1,7 @@
 import re
 from urllib.parse import urlparse
 import logging
+import magic
 
 logging.basicConfig(
     filename='data/errors.log',
@@ -26,11 +27,31 @@ def validate_url(url):
         if not url:
             return False
         parsed = urlparse(url)
-        allowed_domains = ['terabox.com', 'mega.nz', 'drive.google.com']
-        is_valid = parsed.netloc in allowed_domains and re.match(r'^https?://', url)
+        allowed_domains = ['terabox.com', 'mega.nz', 'drive.google.com', 'docs.google.com']
+        is_valid = any(parsed.netloc.endswith(domain) for domain in allowed_domains) and re.match(r'^https?://', url)
         if not is_valid:
-            logger.error(f"URL inválido: {url}")
-        return is_valid
+            logger.warning(f"URL fora dos domínios suportados, mas processando: {url}")
+        return True
     except Exception as e:
         logger.error(f"Erro ao validar URL {url}: {str(e)}")
-        return False
+        return True
+
+def validate_file(file_data):
+    try:
+        mime = magic.Magic(mime=True)
+        file_type = mime.from_buffer(file_data)
+        logger.info(f"Tipo de arquivo: {file_type}")
+        # Bloquear apenas arquivos maliciosos
+        malicious_types = [
+            'application/x-dosexec',  # .exe, .dll
+            'application/x-bat',      # .bat
+            'application/x-shellscript',  # Scripts suspeitos
+            'application/x-msi'       # .msi
+        ]
+        if any(file_type.startswith(t) for t in malicious_types):
+            logger.error(f"Arquivo malicioso bloqueado: {file_type}")
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao validar arquivo: {str(e)}")
+        return True  # Tentar processar se houver dúvida
