@@ -22,15 +22,15 @@ logger = logging.getLogger('AutoLearnAI')
 
 try:
     st.title("AutoLearnAI - Assistente Seguro e Colaborativo")
-    st.write("Envie qualquer arquivo ou link de Terabox, MEGA, Google Drive, Google Docs ou PC. Pergunte e aprenda com a comunidade!")
+    st.write("Envie qualquer arquivo ou link de Terabox, MEGA, Google Drive, Google Docs ou PC!")
 
     if 'encryption_key' not in st.session_state:
         st.session_state.encryption_key = base64.b64encode(get_random_bytes(32)).decode()
 
-    source = st.selectbox("De onde vêm seus dados?", ["Terabox", "MEGA", "Google Drive", "Google Docs", "Computador"])
-    file_urls = st.text_area("Cole links (um por linha)", help="Suporta pastas, arquivos e documentos!")
+    source = st.selectbox("De onde vêm seus dados?", ["Auto-detectar", "Terabox", "MEGA", "Google Drive", "Google Docs", "Computador"])
+    file_urls = st.text_area("Cole links (um por linha)", help="Suporta pastas, arquivos, documentos!")
     if source == "Computador":
-        uploaded_files = st.file_uploader("Escolha arquivos", accept_multiple_files=True, help="Qualquer formato, máximo 100MB")
+        uploaded_files = st.file_uploader("Escolha arquivos", accept_multiple_files=True, help="Qualquer formato, até 100MB")
 
     if st.button("Enviar Dados"):
         with st.spinner("Criptografando e processando..."):
@@ -44,10 +44,11 @@ try:
                     collection = process_files(uploaded_files, source, shared=True, encryption_key=st.session_state.encryption_key)
                 else:
                     sanitized_urls = [sanitize_input(url) for url in file_urls.split('\n') if url.strip()]
-                    collection = process_files(sanitized_urls, source, shared=True, encryption_key=st.session_state.encryption_key)
+                    source_to_use = "Auto-detectar" if source == "Auto-detectar" else source
+                    collection = process_files(sanitized_urls, source_to_use, shared=True, encryption_key=st.session_state.encryption_key)
                 st.success("Dados adicionados à biblioteca!")
             except Exception as e:
-                logger.error(f"Erro ao processar dados: {str(e)}", exc_info=True)
+                logger.error(f"Erro ao processar dados: {str(e)}")
                 st.error(f"Falha ao processar: {e}")
 
     model_options = ["Llama 3", "Mistral 7B", "Grok", "Gemma 2", "CodeLlama", "DeepSeek", "Falcon 7B", "Qwen 2", "Phi-3"]

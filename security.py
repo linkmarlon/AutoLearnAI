@@ -41,7 +41,6 @@ def validate_file(file_data):
         mime = magic.Magic(mime=True)
         file_type = mime.from_buffer(file_data)
         logger.info(f"Tipo de arquivo: {file_type}")
-        # Bloquear apenas arquivos maliciosos
         malicious_types = [
             'application/x-dosexec',  # .exe, .dll
             'application/x-bat',      # .bat
@@ -54,4 +53,4 @@ def validate_file(file_data):
         return True
     except Exception as e:
         logger.error(f"Erro ao validar arquivo: {str(e)}")
-        return True  # Tentar processar se houver dúvida
+        return True
