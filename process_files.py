@@ -15,10 +15,9 @@ from io import BytesIO
 import mega
 from gdown import download
 import hashlib
-from security import validate_url, validate_file, encrypt_file, decrypt_file
+from security import validate_url, validate_file
 import logging
 from urllib.parse import urlparse
-import json
 
 logging.basicConfig(
     filename='data/errors.log',
@@ -113,7 +112,7 @@ def download_from_google_docs(url):
         logger.error(f"Erro ao baixar do Google Docs: {str(e)}")
         raise
 
-def download_file(source, url, encryption_key):
+def download_file(source, url):
     try:
         temp_dir = 'data/'
         os.makedirs(temp_dir, exist_ok=True)
@@ -136,13 +135,9 @@ def download_file(source, url, encryption_key):
             if not isinstance(data, bytes):
                 data = bytes(data)
             if validate_file(data):
-                key = base64.b64decode(encryption_key)
-                if not isinstance(key, bytes):
-                    key = bytes(key)
-                encrypted_data = encrypt_file(data, key)
-                file_path = os.path.join(temp_dir, f'temp_file_{i}.enc')
-                with open(file_path, 'w') as f:
-                    json.dump(encrypted_data, f)
+                file_path = os.path.join(temp_dir, f'temp_file_{i}.bin')
+                with open(file_path, 'wb') as f:
+                    f.write(data)
                 file_paths.append(file_path)
             else:
                 logger.error(f"Arquivo inválido bloqueado: {url}")
@@ -151,17 +146,11 @@ def download_file(source, url, encryption_key):
         logger.error(f"Erro ao baixar arquivo de {detected_source or source}: {str(e)}")
         raise
 
-def extract_text(file_path, encryption_key):
+def extract_text(file_path):
     try:
-        with open(file_path, 'r') as f:
-            encrypted_data = json.load(f)
-        key = base64.b64decode(encryption_key)
-        if not isinstance(key, bytes):
-            key = bytes(key)
-        data = decrypt_file(encrypted_data, key)
-        if not data:
-            return "[Erro ao descriptografar]"
-        temp_file = 'data/temp_decrypted'
+        with open(file_path, 'rb') as f:
+            data = f.read()
+        temp_file = 'data/temp_decrypted.bin'
         with open(temp_file, 'wb') as f:
             f.write(data)
     except Exception as e:
@@ -207,14 +196,10 @@ def extract_text(file_path, encryption_key):
                     with open(file_path, 'rb') as ff:
                         temp_data = ff.read()
                     if validate_file(temp_data):
-                        key = base64.b64decode(encryption_key)
-                        if not isinstance(key, bytes):
-                            key = bytes(key)
-                        temp_encrypted = encrypt_file(temp_data, key)
-                        temp_enc_path = os.path.join(temp_extract, f'enc_{f}.enc')
-                        with open(temp_enc_path, 'w') as ff:
-                            json.dump(temp_encrypted, ff)
-                        texts.append(extract_text(temp_enc_path, encryption_key))
+                        temp_path = os.path.join(temp_extract, f'temp_{f}.bin')
+                        with open(temp_path, 'wb') as ff:
+                            ff.write(temp_data)
+                        texts.append(extract_text(temp_path))
                     else:
                         logger.error(f"Arquivo extraído bloqueado: {f}")
             return '\n'.join(texts)
@@ -231,7 +216,7 @@ def extract_text(file_path, encryption_key):
         if os.path.exists(temp_file):
             os.remove(temp_file)
 
-def process_files(files, source='Computador', shared=False, encryption_key=None):
+def process_files(files, source='Computador', shared=False):
     global collection
     texts = []
     file_hashes = []
@@ -252,14 +237,10 @@ def process_files(files, source='Computador', shared=False, encryption_key=None)
                     if validate_file(file_data):
                         file_hash = get_file_hash(file_data)
                         if file_hash not in existing_hashes:
-                            key = base64.b64decode(encryption_key)
-                            if not isinstance(key, bytes):
-                                key = bytes(key)
-                            encrypted_data = encrypt_file(file_data, key)
-                            file_path = os.path.join('data/', file.name + '.enc')
-                            with open(file_path, 'w') as f:
-                                json.dump(encrypted_data, f)
-                            texts.append(extract_text(file_path, encryption_key))
+                            file_path = os.path.join('data/', file.name + '.bin')
+                            with open(file_path, 'wb') as f:
+                                f.write(file_data)
+                            texts.append(extract_text(file_path))
                             file_hashes.append(file_hash)
                         else:
                             logger.info(f"Arquivo duplicado: {file.name}")
@@ -271,23 +252,14 @@ def process_files(files, source='Computador', shared=False, encryption_key=None)
             for url in files:
                 if url.strip():
                     try:
-                        file_paths = download_file(source, url, encryption_key)
+                        file_paths = download_file(source, url)
                         for file_path in file_paths:
-                            with open(file_path, 'r') as f:
-                                encrypted_data = json.load(f)
-                            key = base64.b64decode(encryption_key)
-                            if not isinstance(key, bytes):
-                                key = bytes(key)
-                            decrypted_data = decrypt_file(encrypted_data, key)
-                            if decrypted_data:
-                                if not isinstance(decrypted_data, bytes):
-                                    decrypted_data = bytes(decrypted_data)
-                                file_hash = get_file_hash(decrypted_data)
-                                if file_hash not in existing_hashes:
-                                    texts.append(extract_text(file_path, encryption_key))
-                                    file_hashes.append(file_hash)
-                            else:
-                                logger.error(f"Falha ao descriptografar: {url}")
+                            with open(file_path, 'rb') as f:
+                                file_data = f.read()
+                            file_hash = get_file_hash(file_data)
+                            if file_hash not in existing_hashes:
+                                texts.append(extract_text(file_path))
+                                file_hashes.append(file_hash)
                     except Exception as e:
                         logger.error(f"Erro ao processar URL {url}: {str(e)}")
 

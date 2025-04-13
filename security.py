@@ -1,11 +1,7 @@
 import re
-import base64
 import magic
 import logging
 from urllib.parse import urlparse
-from Crypto.Cipher import AES
-from Crypto.Random import get_random_bytes
-from Crypto.Util.Padding import pad, unpad
 
 logging.basicConfig(
     filename='data/errors.log',
@@ -60,48 +56,3 @@ def validate_file(file_data):
     except Exception as e:
         logger.error(f"Erro ao validar arquivo: {str(e)}")
         return True
-
-def encrypt_file(data, key):
-    try:
-        # Garantir que data seja bytes
-        if not isinstance(data, bytes):
-            if isinstance(data, bytearray):
-                data = bytes(data)
-            else:
-                data = data.encode('utf-8')
-        # Garantir que key seja bytes
-        if not isinstance(key, bytes):
-            if isinstance(key, bytearray):
-                key = bytes(key)
-            else:
-                key = key.encode('utf-8')
-        # Ajustar tamanho da chave
-        if len(key) not in [16, 24, 32]:
-            key = pad(key, 32)[:32]
-        cipher = AES.new(key, AES.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(data, AES.block_size))
-        iv = base64.b64encode(cipher.iv).decode('utf-8')
-        ct = base64.b64encode(ct_bytes).decode('utf-8')
-        return {'iv': iv, 'ciphertext': ct}
-    except Exception as e:
-        logger.error(f"Erro ao criptografar arquivo: {str(e)}")
-        raise
-
-def decrypt_file(enc_data, key):
-    try:
-        # Garantir que key seja bytes
-        if not isinstance(key, bytes):
-            if isinstance(key, bytearray):
-                key = bytes(key)
-            else:
-                key = key.encode('utf-8')
-        if len(key) not in [16, 24, 32]:
-            key = pad(key, 32)[:32]
-        iv = base64.b64decode(enc_data['iv'])
-        ct = base64.b64decode(enc_data['ciphertext'])
-        cipher = AES.new(key, AES.MODE_CBC, iv=iv)
-        pt = unpad(cipher.decrypt(ct), AES.block_size)
-        return pt
-    except Exception as e:
-        logger.error(f"Erro ao descriptografar arquivo: {str(e)}")
-        return None
