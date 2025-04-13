@@ -157,7 +157,7 @@ def extract_text(file_path):
         logger.error(f"Erro ao preparar arquivo: {str(e)}")
         return "[Erro ao processar arquivo]"
 
-    ext = os.path.splitext(temp_file)[1].lower()
+    ext = os.path.splitext(file_path)[1].lower()
     try:
         if ext == '.pdf':
             with pdfplumber.open(temp_file) as pdf:
@@ -196,9 +196,7 @@ def extract_text(file_path):
                     with open(file_path, 'rb') as ff:
                         temp_data = ff.read()
                     if validate_file(temp_data):
-                        temp_path = os.path.join(temp_extract, f'temp_{f}.bin')
-                        with open(temp_path, 'wb') as ff:
-                            ff.write(temp_data)
+                        temp_path = os.path.join(temp_extract, f)
                         texts.append(extract_text(temp_path))
                     else:
                         logger.error(f"Arquivo extraído bloqueado: {f}")
@@ -237,7 +235,7 @@ def process_files(files, source='Computador', shared=False):
                     if validate_file(file_data):
                         file_hash = get_file_hash(file_data)
                         if file_hash not in existing_hashes:
-                            file_path = os.path.join('data/', file.name + '.bin')
+                            file_path = os.path.join('data/', file.name)
                             with open(file_path, 'wb') as f:
                                 f.write(file_data)
                             texts.append(extract_text(file_path))
@@ -256,6 +254,8 @@ def process_files(files, source='Computador', shared=False):
                         for file_path in file_paths:
                             with open(file_path, 'rb') as f:
                                 file_data = f.read()
+                            if not isinstance(file_data, bytes):
+                                file_data = bytes(file_data)
                             file_hash = get_file_hash(file_data)
                             if file_hash not in existing_hashes:
                                 texts.append(extract_text(file_path))
