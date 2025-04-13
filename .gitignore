@@ -1,0 +1,18 @@
+# Arquivos temporários e dados
+data/
+*.pyc
+__pycache__/
+*.log
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
+*.bz2
+
+# Ambientes virtuais
+venv/
+.env
+
+# Arquivos do Colab
+.ipynb_checkpoints/
