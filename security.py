@@ -1,6 +1,8 @@
+import re
 import base64
 import magic
 import logging
+from urllib.parse import urlparse
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad, unpad
@@ -12,30 +14,72 @@ logging.basicConfig(
 )
 logger = logging.getLogger('Security')
 
-def validate_file(file_content, file_name):
+def sanitize_input(text):
     try:
+        if not text:
+            return text
+        sanitized = re.sub(r'[<>{};`]', '', text.strip())
+        if sanitized != text:
+            logger.warning(f"Entrada sanitizada: {text[:50]}...")
+        return sanitized
+    except Exception as e:
+        logger.error(f"Erro ao sanitizar entrada: {str(e)}")
+        return text
+
+def validate_url(url):
+    try:
+        if not url:
+            return False
+        parsed = urlparse(url)
+        allowed_domains = ['terabox.com', '1024terabox.com', 'mega.nz', 'drive.google.com', 'docs.google.com']
+        is_valid = any(parsed.netloc.lower().endswith(domain) for domain in allowed_domains) and re.match(r'^https?://', url)
+        if not is_valid:
+            logger.warning(f"URL fora dos domínios suportados, mas processando: {url}")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao validar URL {url}: {str(e)}")
+        return True
+
+def validate_file(file_data):
+    try:
+        if not isinstance(file_data, bytes):
+            file_data = bytes(file_data)
         mime = magic.Magic(mime=True)
-        file_type = mime.from_buffer(file_content)
-        malicious_types = ['application/x-dosexec', 'application/x-msdownload']
-        malicious_extensions = ['.exe', '.bat', '.cmd', '.msi']
-        if file_type in malicious_types or any(file_name.lower().endswith(ext) for ext in malicious_extensions):
-            logger.error(f"Arquivo malicioso detectado: {file_name}, tipo: {file_type}")
+        file_type = mime.from_buffer(file_data)
+        logger.info(f"Tipo de arquivo: {file_type}")
+        malicious_types = [
+            'application/x-dosexec',
+            'application/x-bat',
+            'application/x-shellscript',
+            'application/x-msi'
+        ]
+        if any(file_type.startswith(t) for t in malicious_types):
+            logger.error(f"Arquivo malicioso bloqueado: {file_type}")
             return False
         return True
     except Exception as e:
-        logger.error(f"Erro ao validar arquivo {file_name}: {str(e)}")
-        return False
+        logger.error(f"Erro ao validar arquivo: {str(e)}")
+        return True
 
-def encrypt_file(file_content, key):
+def encrypt_file(data, key):
     try:
-        if isinstance(file_content, bytearray):
-            file_content = bytes(file_content)  # Converter bytearray para bytes
-        if isinstance(key, bytearray):
-            key = bytes(key)  # Converter key para bytes
+        # Garantir que data seja bytes
+        if not isinstance(data, bytes):
+            if isinstance(data, bytearray):
+                data = bytes(data)
+            else:
+                data = data.encode('utf-8')
+        # Garantir que key seja bytes
+        if not isinstance(key, bytes):
+            if isinstance(key, bytearray):
+                key = bytes(key)
+            else:
+                key = key.encode('utf-8')
+        # Ajustar tamanho da chave
         if len(key) not in [16, 24, 32]:
             key = pad(key, 32)[:32]
         cipher = AES.new(key, AES.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(file_content, AES.block_size))
+        ct_bytes = cipher.encrypt(pad(data, AES.block_size))
         iv = base64.b64encode(cipher.iv).decode('utf-8')
         ct = base64.b64encode(ct_bytes).decode('utf-8')
         return {'iv': iv, 'ciphertext': ct}
@@ -45,8 +89,12 @@ def encrypt_file(file_content, key):
 
 def decrypt_file(enc_data, key):
     try:
-        if isinstance(key, bytearray):
-            key = bytes(key)  # Converter key para bytes
+        # Garantir que key seja bytes
+        if not isinstance(key, bytes):
+            if isinstance(key, bytearray):
+                key = bytes(key)
+            else:
+                key = key.encode('utf-8')
         if len(key) not in [16, 24, 32]:
             key = pad(key, 32)[:32]
         iv = base64.b64decode(enc_data['iv'])
@@ -56,8 +104,4 @@ def decrypt_file(enc_data, key):
         return pt
     except Exception as e:
         logger.error(f"Erro ao descriptografar arquivo: {str(e)}")
-        raise
-
-def validate_url(url):
-    malicious_patterns = ['malicious.com', 'phishing.com']
-    return not any(pattern in url.lower() for pattern in malicious_patterns)
+        return None

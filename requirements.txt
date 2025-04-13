@@ -14,3 +14,4 @@ mega.py
 gdown
 pycryptodome
 python-magic
+pyngrok
